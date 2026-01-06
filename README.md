@@ -30,12 +30,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"log"
+	"net/http"
+
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/tigerwill90/fox"
 	"github.com/tigerwill90/foxwaf"
-	"log"
-	"net/http"
 )
 
 func main() {
@@ -52,16 +54,13 @@ func main() {
 		panic(err)
 	}
 
-	f, err := fox.New(
+	f := fox.MustRouter(
 		fox.DefaultOptions(),
 		fox.WithMiddleware(foxwaf.Middleware(waf)),
 	)
-	if err != nil {
-		panic(err)
-	}
 
-	f.MustHandle(http.MethodGet, "/hello/{name}", func(c fox.Context) {
-		_ = c.String(http.StatusOK, "Hello, %s", c.Param("name"))
+	f.MustAdd(fox.MethodGet, "/hello/{name}", func(c *fox.Context) {
+		_ = c.String(http.StatusOK, fmt.Sprintf("Hello, %s", c.Param("name")))
 	})
 
 	if err = http.ListenAndServe(":8080", f); err != nil && !errors.Is(err, http.ErrServerClosed) {

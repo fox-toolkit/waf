@@ -44,7 +44,7 @@ func Middleware(waf coraza.WAF) fox.MiddlewareFunc {
 	}
 
 	return func(next fox.HandlerFunc) fox.HandlerFunc {
-		return func(c fox.Context) {
+		return func(c *fox.Context) {
 			req := c.Request()
 			tx := newTX(req)
 			defer func() {
