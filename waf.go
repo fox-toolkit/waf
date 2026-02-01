@@ -5,7 +5,7 @@
 // and the OWASP Coraza contributors). Mount of this source code is governed by an Apache-2.0 that can be found
 // at https://github.com/corazawaf/coraza/blob/main/LICENSE.
 
-package foxwaf
+package waf
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ import (
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/experimental"
 	"github.com/corazawaf/coraza/v3/types"
-	"github.com/tigerwill90/fox"
+	"github.com/fox-toolkit/fox"
 )
 
 var p = sync.Pool{
@@ -249,7 +249,7 @@ func relevantCaller() runtime.Frame {
 	var frame runtime.Frame
 	for {
 		f, more := frames.Next()
-		if !strings.HasPrefix(f.Function, "github.com/tigerwill90/foxwaf.") {
+		if !strings.HasPrefix(f.Function, "github.com/fox-toolkit/waf.") {
 			return f
 		}
 		if !more {

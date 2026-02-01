@@ -5,7 +5,7 @@
 // and the OWASP Coraza contributors). Mount of this source code is governed by an Apache-2.0 that can be found
 // at https://github.com/corazawaf/coraza/blob/main/LICENSE.
 
-package foxwaf
+package waf
 
 import (
 	"bufio"
@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/corazawaf/coraza/v3/types"
-	"github.com/tigerwill90/fox"
+	"github.com/fox-toolkit/fox"
 )
 
 var _ fox.ResponseWriter = (*rwInterceptor)(nil)

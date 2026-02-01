@@ -1,10 +1,10 @@
-module github.com/tigerwill90/foxwaf
+module github.com/fox-toolkit/waf
 
 go 1.24.6
 
 require (
 	github.com/corazawaf/coraza/v3 v3.3.3
-	github.com/tigerwill90/fox v0.26.2
+	github.com/fox-toolkit/fox v0.27.0
 )
 
 require (

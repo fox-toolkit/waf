@@ -1,26 +1,26 @@
-[![Go Reference](https://pkg.go.dev/badge/github.com/tigerwill90/foxwaf.svg)](https://pkg.go.dev/github.com/tigerwill90/foxwaf)
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/tigerwill90/foxwaf)
-![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/tigerwill90/foxwaf)
+[![Go Reference](https://pkg.go.dev/badge/github.com/fox-toolkit/waf.svg)](https://pkg.go.dev/github.com/fox-toolkit/waf)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/fox-toolkit/waf)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/fox-toolkit/waf)
 
-# FoxWAF
+# WAF
 
-FoxWAF is an **experimental** middleware for the [Fox](https://github.com/tigerwill90/fox) router that integrates the 
+WAF is an **experimental** middleware for the [Fox](https://github.com/fox-toolkit/fox) router that integrates the 
 [Coraza Web Application Firewall (WAF)](https://coraza.io/) to enhance the security of your web applications by intercepting 
 and analyzing HTTP requests and responses.
 
 ### Disclaimer
-FoxWAF's API is closely tied to the Fox router, and it will only reach v1 when the router is stabilized. During the pre-v1 phase, 
+This middleware is closely tied to the Fox router, and it will only reach v1 when the router is stabilized. During the pre-v1 phase, 
 breaking changes may occur and will be documented in the release notes.
 
 ### Getting Started
 Installation
 ````sh
-go get -u github.com/tigerwill90/foxwaf
+go get -u github.com/fox-toolkit/waf
 ````
 
 ### Features
 - Enhanced Security: Integrates Coraza WAF to protect your web application from a variety of web attacks.
-- Seamless Integration: Tightly integrates with the Fox ecosystem for enhanced performance and scalability.
+- Seamless Integration: Tightly integrates with the Fox ecosystem.
 - Customizable: Allows for custom security rules and configurations to suit specific use cases.
 
 ### Usage
@@ -36,8 +36,8 @@ import (
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
-	"github.com/tigerwill90/fox"
-	"github.com/tigerwill90/foxwaf"
+	"github.com/fox-toolkit/fox"
+	"github.com/fox-toolkit/waf"
 )
 
 func main() {
@@ -49,14 +49,14 @@ func main() {
 		WithDirectives("SecRuleEngine On").
 		WithRootFS(coreruleset.FS)
 
-	waf, err := coraza.NewWAF(cfg)
+	co, err := coraza.NewWAF(cfg)
 	if err != nil {
 		panic(err)
 	}
 
 	f := fox.MustRouter(
 		fox.DefaultOptions(),
-		fox.WithMiddleware(foxwaf.Middleware(waf)),
+		fox.WithMiddleware(waf.Middleware(co)),
 	)
 
 	f.MustAdd(fox.MethodGet, "/hello/{name}", func(c *fox.Context) {
