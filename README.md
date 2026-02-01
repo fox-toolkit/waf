@@ -4,6 +4,10 @@
 
 # WAF
 
+> [!NOTE]
+> This repository has been transferred from `github.com/tigerwill90/foxwaf` to `github.com/fox-toolkit/waf`.
+> Existing users should update their imports and `go.mod` accordingly.
+
 WAF is an **experimental** middleware for the [Fox](https://github.com/fox-toolkit/fox) router that integrates the 
 [Coraza Web Application Firewall (WAF)](https://coraza.io/) to enhance the security of your web applications by intercepting 
 and analyzing HTTP requests and responses.
