@@ -82,6 +82,12 @@ func Middleware(waf coraza.WAF) fox.MiddlewareFunc {
 
 			next(cc)
 
+			// If the connection has been hijacked (e.g. WebSocket upgrade),
+			// we must not attempt to write to the response writer anymore.
+			if interceptor.isHijacked {
+				return
+			}
+
 			if err := processResponse(tx, interceptor); err != nil {
 				tx.DebugLogger().Error().Err(err).Msg("Failed to close the response")
 				return
@@ -126,8 +132,10 @@ func processRequest(tx types.Transaction, req *http.Request) (*types.Interruptio
 
 	// Transfer-Encoding header is removed by go/http
 	// We manually add it to make rules relying on it work (E.g. CRS rule 920171)
-	if req.TransferEncoding != nil {
-		tx.AddRequestHeader("Transfer-Encoding", req.TransferEncoding[0])
+	// All values must be added to allow the WAF to detect HTTP request smuggling
+	// attempts (e.g. TE.TE attacks).
+	for _, te := range req.TransferEncoding {
+		tx.AddRequestHeader("Transfer-Encoding", te)
 	}
 
 	in = tx.ProcessRequestHeaders()
@@ -192,7 +200,7 @@ func processResponse(tx types.Transaction, i *rwInterceptor) error {
 		return nil
 	}
 
-	if tx.IsResponseBodyAccessible() && tx.IsResponseBodyProcessable() {
+	if tx.IsResponseBodyAccessible() && tx.IsResponseBodyProcessable() && !i.wroteBufferedBodyToDownstream {
 		if it, err := tx.ProcessResponseBody(); err != nil {
 			i.overrideWriteHeader(http.StatusInternalServerError)
 			i.flushWriteHeader()
@@ -205,25 +213,11 @@ func processResponse(tx types.Transaction, i *rwInterceptor) error {
 			i.flushWriteHeader()
 			return nil
 		}
-
-		// we release the buffer
-		reader, err := tx.ResponseBodyReader()
-		if err != nil {
-			i.overrideWriteHeader(http.StatusInternalServerError)
-			i.flushWriteHeader()
-			return fmt.Errorf("failed to release the response body reader: %v", err)
-		}
-
-		// this is the last opportunity we have to report the resolved status code
-		// as next step is write into the response writer (triggering a 200 in the
-		// response status code.)
-		i.flushWriteHeader()
-		if _, err := io.Copy(i.w, reader); err != nil {
-			return fmt.Errorf("failed to copy the response body: %v", err)
-		}
-	} else {
-		i.flushWriteHeader()
+		return i.writeBufferedResponseBodyToDownstream()
 	}
+
+	i.allowFlushing = true
+	i.flushWriteHeader()
 
 	return nil
 }

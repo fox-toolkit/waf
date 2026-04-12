@@ -9,8 +9,8 @@ package waf
 
 import (
 	"bufio"
+	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"path"
@@ -33,13 +33,16 @@ var copyBufPool = sync.Pool{
 const notWritten = -1
 
 type rwInterceptor struct {
-	w                  fox.ResponseWriter
-	tx                 types.Transaction
-	proto              string
-	statusCode         int
-	size               int
-	isWriteHeaderFlush bool
-	wroteHeader        bool
+	w                             fox.ResponseWriter
+	tx                            types.Transaction
+	proto                         string
+	statusCode                    int
+	size                          int
+	isWriteHeaderFlush            bool
+	wroteHeader                   bool
+	wroteBufferedBodyToDownstream bool
+	isHijacked                    bool
+	allowFlushing                 bool
 }
 
 // Status recorded after Write and WriteHeader.
@@ -65,9 +68,15 @@ func (w *rwInterceptor) Size() int {
 func (w *rwInterceptor) WriteHeader(statusCode int) {
 	if w.wroteHeader {
 		caller := relevantCaller()
-		log.Printf("http: superfluous response.WriteHeader call from %s (%s:%d)", caller.Function, path.Base(caller.File), caller.Line)
+		w.tx.DebugLogger().Warn().
+			Str("caller", caller.Function).
+			Str("file", path.Base(caller.File)).
+			Int("line", caller.Line).
+			Msg("http: superfluous response.WriteHeader call")
 		return
 	}
+
+	w.wroteHeader = true
 
 	for k, vv := range w.w.Header() {
 		for _, v := range vv {
@@ -85,7 +94,17 @@ func (w *rwInterceptor) WriteHeader(statusCode int) {
 		return
 	}
 
-	w.wroteHeader = true
+	// For WebSocket upgrades (101 Switching Protocols), flush the headers
+	// immediately. The connection is about to be hijacked for bidirectional
+	// communication and there will be no HTTP response body to process.
+	if statusCode == http.StatusSwitchingProtocols {
+		w.flushWriteHeader()
+	}
+	if !w.tx.IsResponseBodyAccessible() || !w.tx.IsResponseBodyProcessable() {
+		// if the response body isn't accessible or processable we can already allow flushing
+		// we need to set this flag before the first call to Flush()
+		w.allowFlushing = true
+	}
 }
 
 // Write buffers the response body until the request body limit is reach or an
@@ -106,7 +125,7 @@ func (w *rwInterceptor) Write(b []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	if w.tx.IsResponseBodyAccessible() && w.tx.IsResponseBodyProcessable() {
+	if w.tx.IsResponseBodyAccessible() && w.tx.IsResponseBodyProcessable() && !w.wroteBufferedBodyToDownstream {
 		// we only buffer the response body if we are going to access
 		// to it, otherwise we just send it to the response writer.
 		it, n, err := w.tx.WriteResponseBody(b)
@@ -119,8 +138,17 @@ func (w *rwInterceptor) Write(b []byte) (int, error) {
 			w.flushWriteHeader()
 			return 0, nil
 		}
-		w.size += n
-		return n, err
+		if err != nil || n == len(b) {
+			w.size += n
+			return n, err
+		}
+		if err := w.writeBufferedResponseBodyToDownstream(); err != nil {
+			w.size += n
+			return n, err
+		}
+		n2, err := w.w.Write(b[n:])
+		w.size += n + n2
+		return n + n2, err
 	}
 
 	// flush the status code before writing
@@ -156,6 +184,11 @@ func (w *rwInterceptor) FlushError() error {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
+
+	if w.allowFlushing && w.isWriteHeaderFlush {
+		// only propagate flush if the headers have been flushed already
+		return w.w.FlushError()
+	}
 	return nil
 }
 
@@ -168,7 +201,12 @@ func (w *rwInterceptor) Push(target string, opts *http.PushOptions) error {
 // Hijack lets the caller take over the connection. If hijacking the connection is not supported, Hijack returns
 // an error matching http.ErrNotSupported. See http.Hijacker for more details.
 func (w *rwInterceptor) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return w.w.Hijack()
+	conn, rw, err := w.w.Hijack()
+	if err != nil {
+		return conn, rw, err
+	}
+	w.isHijacked = true
+	return conn, rw, nil
 }
 
 func (w *rwInterceptor) Header() http.Header {
@@ -203,6 +241,9 @@ func (w *rwInterceptor) reset(tx types.Transaction, writer fox.ResponseWriter, p
 	w.size = notWritten
 	w.isWriteHeaderFlush = false
 	w.wroteHeader = false
+	w.wroteBufferedBodyToDownstream = false
+	w.isHijacked = false
+	w.allowFlushing = false
 }
 
 // overrideWriteHeader overrides the recorded status code
@@ -224,6 +265,33 @@ func (w *rwInterceptor) cleanHeaders() {
 	for k := range w.w.Header() {
 		w.w.Header().Del(k)
 	}
+}
+
+// writeBufferedResponseBodyToDownstream releases the buffered response body
+// to the underlying writer. It is idempotent.
+func (w *rwInterceptor) writeBufferedResponseBodyToDownstream() error {
+	if w.wroteBufferedBodyToDownstream {
+		return nil
+	}
+
+	// we release the buffer
+	reader, err := w.tx.ResponseBodyReader()
+	if err != nil {
+		w.overrideWriteHeader(http.StatusInternalServerError)
+		w.flushWriteHeader()
+		return fmt.Errorf("failed to release the response body reader: %v", err)
+	}
+
+	// this is the last opportunity we have to report the resolved status code
+	// as next step is write into the response writer (triggering a 200 in the
+	// response status code.)
+	w.flushWriteHeader()
+	if _, err := io.Copy(w.w, reader); err != nil {
+		return fmt.Errorf("failed to copy the response body: %v", err)
+	}
+
+	w.wroteBufferedBodyToDownstream = true
+	return nil
 }
 
 type onlyWrite struct {
