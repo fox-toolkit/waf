@@ -6,8 +6,8 @@ github.com/corazawaf/libinjection-go v0.3.2 h1:9rrKt0lpg4WvUXt+lwS06GywfqRXXsa/7
 github.com/corazawaf/libinjection-go v0.3.2/go.mod h1:Ik/+w3UmTWH9yn366RgS9D95K3y7Atb5m/H/gXzzPCk=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/fox-toolkit/fox v0.28.0 h1:ASwKZzWOkGwMiumTMAdoTDEEdR6AvAGtuvHEgm5jmpI=
-github.com/fox-toolkit/fox v0.28.0/go.mod h1:RxdPgLc0F3GLkERhNdvdP++SI9xyEwIgjmxGxSRXWbM=
+github.com/fox-toolkit/fox v0.28.1 h1:Y/Uuk4YPZDyn+a1kDYwoYXiB+lqikdK38rdfnnI0VsI=
+github.com/fox-toolkit/fox v0.28.1/go.mod h1:RxdPgLc0F3GLkERhNdvdP++SI9xyEwIgjmxGxSRXWbM=
 github.com/foxcpp/go-mockdns v1.1.0 h1:jI0rD8M0wuYAxL7r/ynTrCQQq0BVqfB99Vgk7DlmewI=
 github.com/foxcpp/go-mockdns v1.1.0/go.mod h1:IhLeSFGed3mJIAXPH2aiRQB+kqz7oqu8ld2qVbOu7Wk=
 github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 h1:vymEbVwYFP/L05h5TKQxvkXoKxNvTpjxYKdF1Nlwuao=
