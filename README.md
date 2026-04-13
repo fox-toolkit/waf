@@ -22,11 +22,6 @@ Installation
 go get -u github.com/fox-toolkit/waf
 ````
 
-### Features
-- Enhanced Security: Integrates Coraza WAF to protect your web application from a variety of web attacks.
-- Seamless Integration: Tightly integrates with the Fox ecosystem.
-- Customizable: Allows for custom security rules and configurations to suit specific use cases.
-
 ### Usage
 Here is an example to load [OWASP CRS](https://coreruleset.org/) using [coraza-coreruleset](https://github.com/corazawaf/coraza-coreruleset).
 ````go
