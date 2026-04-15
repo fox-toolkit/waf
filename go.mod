@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/corazawaf/coraza/v3 v3.7.0
-	github.com/fox-toolkit/fox v0.28.1
+	github.com/fox-toolkit/fox v0.28.2
 )
 
 require (
