@@ -4,16 +4,16 @@ go 1.26.2
 
 require (
 	github.com/corazawaf/coraza/v3 v3.7.0
-	github.com/fox-toolkit/fox v0.29.2
+	github.com/fox-toolkit/fox v0.29.3
 )
 
 require (
 	github.com/corazawaf/libinjection-go v0.3.2 // indirect
-	github.com/go-json-experiment/json v0.0.0-20260430182902-b6187a392ed4 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260504200034-64a0a05799db // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/kaptinlin/go-i18n v0.4.6 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.21 // indirect
-	github.com/kaptinlin/jsonschema v0.7.12 // indirect
+	github.com/kaptinlin/go-i18n v0.4.7 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.22 // indirect
+	github.com/kaptinlin/jsonschema v0.7.13 // indirect
 	github.com/kaptinlin/messageformat-go v0.6.3 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745 // indirect
