@@ -4,8 +4,8 @@ github.com/corazawaf/coraza/v3 v3.8.1 h1:dMV55FbMR2vOks/acrT43RShR+VkzU6jwp+XPdx
 github.com/corazawaf/coraza/v3 v3.8.1/go.mod h1:nPVk2JqADYBcKLYvo9cRsr+z4JhanU0WniGhZZBZD6c=
 github.com/corazawaf/libinjection-go v0.3.5 h1:Zj2AAAKnaRtoLCXYqmc/wzCVAVXxe81UpF5JblL4WQA=
 github.com/corazawaf/libinjection-go v0.3.5/go.mod h1:Ik/+w3UmTWH9yn366RgS9D95K3y7Atb5m/H/gXzzPCk=
-github.com/fox-toolkit/fox v0.33.0 h1:1GTggw1DzrHhdnjiQF0nYrQVPtDtmWorU4/ucRv3FIo=
-github.com/fox-toolkit/fox v0.33.0/go.mod h1:IWpK0++VvaNyc8Gts1Zjefow7WymGiY258wC+yY7Xg4=
+github.com/fox-toolkit/fox v1.0.0 h1:Z8Yus2t3xRWk7rT4aSuYkOeG72k53KgwdFb1RcuWrLc=
+github.com/fox-toolkit/fox v1.0.0/go.mod h1:IWpK0++VvaNyc8Gts1Zjefow7WymGiY258wC+yY7Xg4=
 github.com/foxcpp/go-mockdns v1.2.0 h1:omK3OrHRD1IWJz1FuFBCFquhXslXoF17OvBS6JPzZF0=
 github.com/foxcpp/go-mockdns v1.2.0/go.mod h1:IhLeSFGed3mJIAXPH2aiRQB+kqz7oqu8ld2qVbOu7Wk=
 github.com/goccy/go-yaml v1.19.2 h1:PmFC1S6h8ljIz6gMRBopkjP1TVT7xuwrButHID66PoM=

@@ -206,6 +206,8 @@ func (w *rwInterceptor) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return conn, rw, err
 	}
 	w.isHijacked = true
+	// The response is taken over. Reports as written.
+	w.size = 0
 	return conn, rw, nil
 }
 
