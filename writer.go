@@ -117,7 +117,11 @@ func (w *rwInterceptor) Write(b []byte) (int, error) {
 		// if there is an interruption it must be from at least phase 4 and hence
 		// WriteHeader or Write should have been called and hence the status code
 		// has been flushed to the delegated response writer.
-		return 0, nil
+		//
+		// We return the number of bytes as according to the interface io.Writer
+		// if we don't return an error, the number of bytes written is len(p).
+		// See https://pkg.go.dev/io#Writer
+		return len(b), nil
 	}
 
 	if !w.wroteHeader {
@@ -136,13 +140,16 @@ func (w *rwInterceptor) Write(b []byte) (int, error) {
 			w.overrideWriteHeader(obtainStatusCodeFromInterruptionOrDefault(it, w.statusCode))
 			// We only flush the status code after an interruption.
 			w.flushWriteHeader()
-			return 0, nil
+			// We return the number of bytes as according to the interface io.Writer
+			// if we don't return an error, the number of bytes written is len(p).
+			// See https://pkg.go.dev/io#Writer
+			return len(b), nil
 		}
 		if err != nil || n == len(b) {
 			w.size += n
 			return n, err
 		}
-		if err := w.writeBufferedResponseBodyToDownstream(); err != nil {
+		if err = w.writeBufferedResponseBodyToDownstream(); err != nil {
 			w.size += n
 			return n, err
 		}
