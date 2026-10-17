@@ -82,12 +82,6 @@ func Middleware(waf coraza.WAF) fox.MiddlewareFunc {
 
 			next(cc)
 
-			// If the connection has been hijacked (e.g. WebSocket upgrade),
-			// we must not attempt to write to the response writer anymore.
-			if interceptor.isHijacked {
-				return
-			}
-
 			if err := processResponse(tx, interceptor); err != nil {
 				tx.DebugLogger().Error().Err(err).Msg("Failed to close the response")
 				return
@@ -193,6 +187,12 @@ func processRequest(tx types.Transaction, req *http.Request) (*types.Interruptio
 
 // processResponse takes care of the response body copyback from the transaction buffer.
 func processResponse(tx types.Transaction, i *rwInterceptor) error {
+	// If the connection has been hijacked (e.g. WebSocket upgrade),
+	// we must not attempt to write to the response writer anymore.
+	if i.isHijacked {
+		return nil
+	}
+
 	// We look for interruptions triggered at phase 3 (response headers)
 	// and during writing the response body. If so, response status code
 	// has been sent over the flush already.
