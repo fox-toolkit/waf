@@ -1,4 +1,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/fox-toolkit/waf.svg)](https://pkg.go.dev/github.com/fox-toolkit/waf)
+[![tests](https://github.com/fox-toolkit/waf/actions/workflows/tests.yaml/badge.svg)](https://github.com/fox-toolkit/waf/actions?query=workflow%3Atests)
+[![codecov](https://codecov.io/gh/fox-toolkit/waf/graph/badge.svg)](https://codecov.io/gh/fox-toolkit/waf)
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/fox-toolkit/waf)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/fox-toolkit/waf)
 
