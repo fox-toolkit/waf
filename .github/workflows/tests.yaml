@@ -1,0 +1,59 @@
+name: tests
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test WAF
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [ '>=1.27' ]
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Check out code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run tests
+        run: go test -v -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Run data races tests
+        run: go test -v -race -run "TestInterceptorReuseConcurrent|TestInterceptorReuse|TestHttpServer" -count=10 ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          files: ./coverage.txt
+          token: ${{ secrets.CODECOV_TOKEN }}
+  lint:
+    name: Lint WAF
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [ '>=1.27' ]
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Check out code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v9
