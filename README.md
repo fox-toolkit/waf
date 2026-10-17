@@ -28,10 +28,12 @@ import (
 	"log"
 	"net/http"
 
-	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
+	corazaconf "github.com/corazawaf/coraza-coreruleset/coraza/v3"
+	crs "github.com/corazawaf/coraza-coreruleset/crs/v4"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/fox-toolkit/fox"
 	"github.com/fox-toolkit/waf"
+	"github.com/jcchavezs/mergefs"
 )
 
 func main() {
@@ -41,7 +43,7 @@ func main() {
 		WithDirectives("Include @crs-setup.conf.example").
 		WithDirectives("Include @owasp_crs/*.conf").
 		WithDirectives("SecRuleEngine On").
-		WithRootFS(coreruleset.FS)
+		WithRootFS(mergefs.Merge(crs.FS, corazaconf.FS))
 
 	co, err := coraza.NewWAF(cfg)
 	if err != nil {
@@ -49,7 +51,6 @@ func main() {
 	}
 
 	f := fox.MustRouter(
-		fox.DefaultOptions(),
 		fox.WithMiddleware(waf.Middleware(co)),
 	)
 
