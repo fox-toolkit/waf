@@ -710,6 +710,58 @@ func TestTxVarForeignTransaction(t *testing.T) {
 	}
 }
 
+func TestRemoveRules(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule REQUEST_URI "@contains evil" "id:1,phase:1,deny,status:403"
+SecRule REQUEST_URI "@contains evil" "id:2,phase:1,deny,status:403"
+SecRule REQUEST_URI "@contains evil" "id:3,phase:2,deny,status:403"
+`)
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/none/*{any}", okHandler)
+	f.MustAdd(fox.MethodGet, "/some/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRules(1, 2)))
+	f.MustAdd(fox.MethodGet, "/all/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRules(1, 2, 3)))
+	f.MustAdd(fox.MethodGet, "/partial-range/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRuleRange(1, 2)))
+	f.MustAdd(fox.MethodGet, "/full-range/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRuleRange(1, 3)))
+
+	cases := map[string]int{
+		"/none/evil":          http.StatusForbidden,
+		"/some/evil":          http.StatusForbidden,
+		"/all/evil":           http.StatusOK,
+		"/partial-range/evil": http.StatusForbidden,
+		"/full-range/evil":    http.StatusOK,
+	}
+	for path, want := range cases {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if have := rec.Code; want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+			}
+		})
+	}
+}
+
+func TestRemoveRulesForeignTransaction(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine On")
+	tx := w.NewTransaction()
+	defer tx.Close()
+
+	foreign := struct{ types.Transaction }{tx}
+	waf.RemoveRules(1)(nil, foreign)
+	waf.RemoveRuleRange(1, 2)(nil, foreign)
+}
+
+func TestRemoveRuleRangeInvalid(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected a panic for an invalid range")
+		}
+	}()
+	waf.RemoveRuleRange(2, 1)
+}
+
 func TestClientAddr(t *testing.T) {
 	xRealIP, err := clientip.NewSingleIPHeader("X-Real-IP")
 	if err != nil {

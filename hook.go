@@ -64,6 +64,40 @@ func TxVar(key, value string) Hook {
 	}
 }
 
+type ruleRemover interface {
+	RemoveRuleByID(id int)
+	RemoveRuleByIDRange(start, end int)
+}
+
+// RemoveRules returns a [Hook] that removes the rules with the given IDs from the transaction, the per-route
+// equivalent of ctl:ruleRemoveById. The rules of the WAF are not affected. Removing rules requires a transaction
+// created by the Coraza WAF implementation. For any other transaction, the hook is a no-op.
+func RemoveRules(ids ...int) Hook {
+	ids = slices.Clone(ids)
+	return func(_ Context, tx types.Transaction) {
+		if remover, ok := tx.(ruleRemover); ok {
+			for _, id := range ids {
+				remover.RemoveRuleByID(id)
+			}
+		}
+	}
+}
+
+// RemoveRuleRange returns a [Hook] that removes the rules whose ID is between start and end inclusive from the
+// transaction, the per-route equivalent of ctl:ruleRemoveById with a range. The rules of the WAF are not affected.
+// Removing rules requires a transaction created by the Coraza WAF implementation. For any other transaction, the
+// hook is a no-op. It panics if start is greater than end.
+func RemoveRuleRange(start, end int) Hook {
+	if start > end {
+		panic("waf: invalid rule range")
+	}
+	return func(_ Context, tx types.Transaction) {
+		if remover, ok := tx.(ruleRemover); ok {
+			remover.RemoveRuleByIDRange(start, end)
+		}
+	}
+}
+
 func runHooks(c *fox.Context, tx types.Transaction) {
 	route := c.Route()
 	if route == nil {
