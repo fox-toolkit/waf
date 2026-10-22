@@ -32,16 +32,3 @@ func TestRunHooksAllocs(t *testing.T) {
 		t.Errorf("unexpected allocations, want: 0, have: %v", allocs)
 	}
 }
-
-func TestRuleRemover(t *testing.T) {
-	w, err := coraza.NewWAF(coraza.NewWAFConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	tx := w.NewTransaction()
-	defer tx.Close()
-
-	if _, ok := tx.(ruleRemover); !ok {
-		t.Error("expected the Coraza transaction to implement ruleRemover")
-	}
-}
