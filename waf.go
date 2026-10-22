@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -65,7 +66,7 @@ func Middleware(waf coraza.WAF) fox.MiddlewareFunc {
 			// ProcessRequest is just a wrapper around ProcessConnection, ProcessURI,
 			// ProcessRequestHeaders and ProcessRequestBody.
 			// It fails if any of these functions returns an error and it stops on interruption.
-			if it, err := processRequest(tx, req); err != nil {
+			if it, err := processRequest(tx, c); err != nil {
 				tx.DebugLogger().Error().Err(err).Msg("Failed to process request")
 				return
 			} else if it != nil {
@@ -94,7 +95,8 @@ func Middleware(waf coraza.WAF) fox.MiddlewareFunc {
 // use http.Request objects so this will implement all phase 0, 1 and 2 variables.
 // Note: This function will stop after an interruption
 // Note: Do not manually fill any request variables
-func processRequest(tx types.Transaction, req *http.Request) (*types.Interruption, error) {
+func processRequest(tx types.Transaction, c *fox.Context) (*types.Interruption, error) {
+	req := c.Request()
 	var (
 		client string
 		cport  int
@@ -104,6 +106,9 @@ func processRequest(tx types.Transaction, req *http.Request) (*types.Interruptio
 	if idx != -1 {
 		client = req.RemoteAddr[:idx]
 		cport, _ = strconv.Atoi(req.RemoteAddr[idx+1:])
+	}
+	if ip, err := c.ClientIP(); err == nil && ip.IsValid() {
+		client, cport = ip.Unmap().WithZone("").String(), 0
 	}
 
 	var in *types.Interruption
@@ -131,6 +136,23 @@ func processRequest(tx types.Transaction, req *http.Request) (*types.Interruptio
 	for _, te := range req.TransferEncoding {
 		tx.AddRequestHeader("Transfer-Encoding", te)
 	}
+
+	if route := c.Route(); route != nil {
+		skip := route.HostnameParamsLen()
+		i := 0
+		for p := range c.Params() {
+			if i >= skip {
+				value, err := url.PathUnescape(p.Value)
+				if err != nil {
+					value = p.Value
+				}
+				tx.AddPathRequestArgument(p.Key, value)
+			}
+			i++
+		}
+	}
+
+	runHooks(c, tx)
 
 	in = tx.ProcessRequestHeaders()
 	if in != nil {
