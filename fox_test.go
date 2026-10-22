@@ -9,13 +9,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/debuglog"
+	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
+	"github.com/corazawaf/coraza/v3/types"
 	"github.com/fox-toolkit/fox"
+	"github.com/fox-toolkit/fox/clientip"
 	"github.com/fox-toolkit/waf"
 )
 
@@ -396,6 +401,51 @@ SecRule SERVER_NAME "@streq blocked.example.com" "id:1,phase:1,deny,status:403"
 	}
 }
 
+func TestPathParams(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule ARGS_PATH:id "@streq blocked" "id:1,phase:1,deny,status:403"
+SecRule &ARGS_PATH:sub "@gt 0" "id:2,phase:1,deny,status:403"
+SecRule ARGS_PATH:path "@streq a/b/c" "id:3,phase:1,deny,status:403"
+SecRule &ARGS_PATH:rest "@eq 1" "id:4,phase:1,deny,status:403"
+SecRule ARGS_PATH:id "@rx ^(?:<script>|é|%3Cx%3E)$" "id:5,phase:1,deny,status:403"
+`)
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "{sub}.example.com/users/{id}", okHandler)
+	f.MustAdd(fox.MethodGet, "/files/+{path}", okHandler)
+	f.MustAdd(fox.MethodGet, "/opt/*{rest}", okHandler)
+
+	cases := []struct {
+		name string
+		host string
+		path string
+		want int
+	}{
+		{name: "path param", host: "fox.example.com", path: "/users/blocked", want: http.StatusForbidden},
+		{name: "host param excluded", host: "fox.example.com", path: "/users/fox", want: http.StatusOK},
+		{name: "encoded path param", host: "fox.example.com", path: "/users/%3Cscript%3E", want: http.StatusForbidden},
+		{name: "encoded utf8 path param", host: "fox.example.com", path: "/users/%C3%A9", want: http.StatusForbidden},
+		{name: "double encoded path param", host: "fox.example.com", path: "/users/%253Cx%253E", want: http.StatusForbidden},
+		{name: "multi segment wildcard", host: "example.com", path: "/files/a/b/c", want: http.StatusForbidden},
+		{name: "other wildcard value", host: "example.com", path: "/files/a/b", want: http.StatusOK},
+		{name: "empty optional wildcard", host: "example.com", path: "/opt/", want: http.StatusForbidden},
+		{name: "no route", host: "example.com", path: "/not-found", want: http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, req)
+			if have := rec.Code; tc.want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", tc.want, have)
+			}
+		})
+	}
+}
+
 // TestRequestBodyWriterTo ensures that the request body seen by the handler supports io.WriterTo and yields the
 // full payload, including the bytes beyond the request body limit.
 func TestRequestBodyWriterTo(t *testing.T) {
@@ -450,4 +500,387 @@ func TestEnableFullDuplex(t *testing.T) {
 	})
 
 	f.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+}
+
+func okHandler(c *fox.Context) {
+	c.Writer().WriteHeader(http.StatusOK)
+}
+
+func TestTransactionHook(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule TX:blocked "@eq 1" "id:1,phase:1,deny,status:403"
+`)
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/hooked", okHandler, waf.WithTransactionHook(waf.TxVar("blocked", "1")))
+	f.MustAdd(fox.MethodGet, "/plain", okHandler)
+
+	for path, want := range map[string]int{"/hooked": http.StatusForbidden, "/plain": http.StatusOK} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if have := rec.Code; want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+			}
+		})
+	}
+}
+
+func TestTransactionHookOrder(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule TX:level "@eq 2" "id:1,phase:1,deny,status:403"
+`)
+
+	var calls []int
+	record := func(n int) waf.Hook {
+		return func(waf.Context, types.Transaction) {
+			calls = append(calls, n)
+		}
+	}
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/recorded", okHandler, waf.WithTransactionHook(record(1), record(2), record(3)))
+	f.MustAdd(fox.MethodGet, "/last-wins", okHandler, waf.WithTransactionHook(waf.TxVar("level", "1"), waf.TxVar("level", "2")))
+	f.MustAdd(fox.MethodGet, "/reversed", okHandler, waf.WithTransactionHook(waf.TxVar("level", "2"), waf.TxVar("level", "1")))
+
+	f.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/recorded", nil))
+	if want, have := []int{1, 2, 3}, calls; !slices.Equal(want, have) {
+		t.Errorf("unexpected hook calls, want: %v, have: %v", want, have)
+	}
+
+	for path, want := range map[string]int{"/last-wins": http.StatusForbidden, "/reversed": http.StatusOK} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if have := rec.Code; want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+			}
+		})
+	}
+}
+
+func TestTransactionHookReplaced(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule TX:blocked "@eq 1" "id:1,phase:1,deny,status:403"
+`)
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/", okHandler,
+		waf.WithTransactionHook(waf.TxVar("blocked", "1")),
+		waf.WithTransactionHook(waf.TxVar("other", "1")),
+	)
+
+	rec := httptest.NewRecorder()
+	f.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if want, have := http.StatusOK, rec.Code; want != have {
+		t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+	}
+}
+
+func TestTransactionHookRequestState(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule TX:name "@streq evil" "id:1,phase:1,deny,status:403"
+`)
+
+	hook := func(c waf.Context, tx types.Transaction) {
+		vars := tx.(plugintypes.TransactionState).Variables()
+		if want, have := c.Request().URL.Path, vars.RequestURI().Get(); want != have {
+			t.Errorf("unexpected REQUEST_URI, want: %q, have: %q", want, have)
+		}
+		if want, have := []string{"value"}, vars.RequestHeaders().Get("X-Test"); !slices.Equal(want, have) {
+			t.Errorf("unexpected REQUEST_HEADERS:X-Test, want: %v, have: %v", want, have)
+		}
+		waf.TxVar("name", c.Param("name"))(c, tx)
+	}
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/users/{name}", okHandler, waf.WithTransactionHook(hook))
+
+	for path, want := range map[string]int{"/users/evil": http.StatusForbidden, "/users/fox": http.StatusOK} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("X-Test", "value")
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, req)
+			if have := rec.Code; want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+			}
+		})
+	}
+}
+
+func TestTransactionHookRuleEngineOff(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine Off")
+
+	called := false
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/", okHandler, waf.WithTransactionHook(func(waf.Context, types.Transaction) {
+		called = true
+	}))
+
+	f.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if called {
+		t.Error("expected the hook not to be called when the rule engine is off")
+	}
+}
+
+func TestTransactionHookWithoutRoute(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine On")
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/", okHandler, waf.WithTransactionHook(waf.TxVar("key", "value")))
+
+	rec := httptest.NewRecorder()
+	f.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/not-found", nil))
+	if want, have := http.StatusNotFound, rec.Code; want != have {
+		t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+	}
+}
+
+func TestWithTransactionHookNilHook(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected a panic for a nil hook")
+		}
+	}()
+	waf.WithTransactionHook(waf.TxVar("key", "value"), nil)
+}
+
+func TestContext(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine On")
+
+	called := false
+	hook := func(c waf.Context, _ types.Transaction) {
+		called = true
+		if want, have := "/users/{name}", c.Route().Pattern(); want != have {
+			t.Errorf("unexpected route pattern, want: %q, have: %q", want, have)
+		}
+		if want, have := "fox", c.Param("name"); want != have {
+			t.Errorf("unexpected param, want: %q, have: %q", want, have)
+		}
+		if want, have := []fox.Param{{Key: "name", Value: "fox"}}, slices.Collect(c.Params()); !slices.Equal(want, have) {
+			t.Errorf("unexpected params, want: %v, have: %v", want, have)
+		}
+		if want, have := "bar", c.QueryParam("foo"); want != have {
+			t.Errorf("unexpected query param, want: %q, have: %q", want, have)
+		}
+		var rc any = c
+		if _, ok := rc.(*fox.Context); ok {
+			t.Error("expected the request context not to expose *fox.Context")
+		}
+		if _, ok := rc.(interface{ Writer() fox.ResponseWriter }); ok {
+			t.Error("expected the request context not to expose the response writer")
+		}
+	}
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/users/{name}", okHandler, waf.WithTransactionHook(hook))
+	f.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/users/fox?foo=bar", nil))
+
+	if !called {
+		t.Error("expected the hook to be called")
+	}
+}
+
+func TestTxVar(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine On")
+	tx := w.NewTransaction()
+	defer tx.Close()
+
+	waf.TxVar("key", "value")(nil, tx)
+
+	if want, have := []string{"value"}, tx.(plugintypes.TransactionState).Variables().TX().Get("key"); !slices.Equal(want, have) {
+		t.Errorf("unexpected TX:key, want: %v, have: %v", want, have)
+	}
+}
+
+func TestTxVarForeignTransaction(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine On")
+	tx := w.NewTransaction()
+	defer tx.Close()
+
+	waf.TxVar("key", "value")(nil, struct{ types.Transaction }{tx})
+
+	if have := tx.(plugintypes.TransactionState).Variables().TX().Get("key"); len(have) != 0 {
+		t.Errorf("expected TX:key to be unset, have: %v", have)
+	}
+}
+
+func TestRemoveRules(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule REQUEST_URI "@contains evil" "id:1,phase:1,deny,status:403"
+SecRule REQUEST_URI "@contains evil" "id:2,phase:1,deny,status:403"
+SecRule REQUEST_URI "@contains evil" "id:3,phase:2,deny,status:403"
+`)
+
+	f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(w)))
+	f.MustAdd(fox.MethodGet, "/none/*{any}", okHandler)
+	f.MustAdd(fox.MethodGet, "/some/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRules(1, 2)))
+	f.MustAdd(fox.MethodGet, "/all/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRules(1, 2, 3)))
+	f.MustAdd(fox.MethodGet, "/partial-range/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRuleRange(1, 2)))
+	f.MustAdd(fox.MethodGet, "/full-range/*{any}", okHandler, waf.WithTransactionHook(waf.RemoveRuleRange(1, 3)))
+
+	cases := map[string]int{
+		"/none/evil":          http.StatusForbidden,
+		"/some/evil":          http.StatusForbidden,
+		"/all/evil":           http.StatusOK,
+		"/partial-range/evil": http.StatusForbidden,
+		"/full-range/evil":    http.StatusOK,
+	}
+	for path, want := range cases {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if have := rec.Code; want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+			}
+		})
+	}
+}
+
+func TestRemoveRulesForeignTransaction(t *testing.T) {
+	w := newWAF(t, "SecRuleEngine On")
+	tx := w.NewTransaction()
+	defer tx.Close()
+
+	foreign := struct{ types.Transaction }{tx}
+	waf.RemoveRules(1)(nil, foreign)
+	waf.RemoveRuleRange(1, 2)(nil, foreign)
+}
+
+func TestRemoveRuleRangeInvalid(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected a panic for an invalid range")
+		}
+	}()
+	waf.RemoveRuleRange(2, 1)
+}
+
+func TestClientAddr(t *testing.T) {
+	xRealIP, err := clientip.NewSingleIPHeader("X-Real-IP")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		resolver   fox.ClientIPResolver
+		remoteAddr string
+		xRealIP    string
+		wantAddr   string
+		wantPort   string
+	}{
+		{
+			name:       "no resolver",
+			remoteAddr: "192.0.2.1:1234",
+			xRealIP:    "203.0.113.7",
+			wantAddr:   "192.0.2.1",
+			wantPort:   "1234",
+		},
+		{
+			name:       "resolved from header",
+			resolver:   xRealIP,
+			remoteAddr: "192.0.2.1:1234",
+			xRealIP:    "203.0.113.7",
+			wantAddr:   "203.0.113.7",
+			wantPort:   "0",
+		},
+		{
+			name:       "resolver error falls back to the peer",
+			resolver:   xRealIP,
+			remoteAddr: "192.0.2.1:1234",
+			wantAddr:   "192.0.2.1",
+			wantPort:   "1234",
+		},
+		{
+			name: "invalid resolved ip falls back to the peer",
+			resolver: fox.ClientIPResolverFunc(func(fox.RequestContext) (netip.Addr, error) {
+				return netip.Addr{}, nil
+			}),
+			remoteAddr: "192.0.2.1:1234",
+			wantAddr:   "192.0.2.1",
+			wantPort:   "1234",
+		},
+		{
+			name:       "resolved ipv6",
+			resolver:   clientip.NewRemoteAddr(),
+			remoteAddr: "[2001:db8::1]:1234",
+			wantAddr:   "2001:db8::1",
+			wantPort:   "0",
+		},
+		{
+			name:       "resolved ipv6 with zone",
+			resolver:   clientip.NewRemoteAddr(),
+			remoteAddr: "[fe80::1%eth0]:1234",
+			wantAddr:   "fe80::1",
+			wantPort:   "0",
+		},
+		{
+			name: "resolved ipv4-mapped ipv6",
+			resolver: fox.ClientIPResolverFunc(func(fox.RequestContext) (netip.Addr, error) {
+				return netip.MustParseAddr("::ffff:203.0.113.7"), nil
+			}),
+			remoteAddr: "192.0.2.1:1234",
+			wantAddr:   "203.0.113.7",
+			wantPort:   "0",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var addr, port string
+			capture := func(_ waf.Context, tx types.Transaction) {
+				vars := tx.(plugintypes.TransactionState).Variables()
+				addr, port = vars.RemoteAddr().Get(), vars.RemotePort().Get()
+			}
+
+			f := fox.MustRouter(fox.WithMiddleware(waf.Middleware(newWAF(t, "SecRuleEngine On"))))
+			f.MustAdd(fox.MethodGet, "/", okHandler, waf.WithTransactionHook(capture), fox.WithClientIPResolver(tc.resolver))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if tc.xRealIP != "" {
+				req.Header.Set("X-Real-IP", tc.xRealIP)
+			}
+			f.ServeHTTP(httptest.NewRecorder(), req)
+
+			if addr != tc.wantAddr {
+				t.Errorf("unexpected REMOTE_ADDR, want: %q, have: %q", tc.wantAddr, addr)
+			}
+			if port != tc.wantPort {
+				t.Errorf("unexpected REMOTE_PORT, want: %q, have: %q", tc.wantPort, port)
+			}
+		})
+	}
+}
+
+func TestClientAddrIPMatch(t *testing.T) {
+	w := newWAF(t, `
+SecRuleEngine On
+SecRule REMOTE_ADDR "@ipMatch 2001:db8::/32,fe80::/10" "id:1,phase:1,deny,status:403"
+`)
+
+	f := fox.MustRouter(
+		fox.WithMiddleware(waf.Middleware(w)),
+		fox.WithClientIPResolver(clientip.NewRemoteAddr()),
+	)
+	f.MustAdd(fox.MethodGet, "/", okHandler)
+
+	for _, remoteAddr := range []string{"[2001:db8::1]:1234", "[fe80::1%eth0]:1234"} {
+		t.Run(remoteAddr, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = remoteAddr
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, req)
+			if want, have := http.StatusForbidden, rec.Code; want != have {
+				t.Errorf("unexpected status code, want: %d, have: %d", want, have)
+			}
+		})
+	}
 }
