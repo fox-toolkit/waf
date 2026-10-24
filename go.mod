@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/corazawaf/coraza/v3 v3.8.1
-	github.com/fox-toolkit/fox v1.1.0
+	github.com/fox-toolkit/fox v1.1.1
 	github.com/mccutchen/go-httpbin/v2 v2.26.0
 )
 
